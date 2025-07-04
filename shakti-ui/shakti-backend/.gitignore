@@ -1,0 +1,28 @@
+node_modules
+# Keep environment variables out of version control
+.env
+
+# Database files
+dev.db
+dev.db-journal
+
+# Prisma generated files (regenerated on deployment)
+/generated/prisma
+
+# Test files (can be removed later if needed)
+test-*.js
+*-test.js
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# TypeScript files (we're using JavaScript)
+*.ts
+tsconfig.json
+src/routes/
+
+# IDE files
+.vscode/settings.json

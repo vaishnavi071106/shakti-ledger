@@ -33,6 +33,14 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# Backend database files
+shakti-backend/dev.db
+shakti-backend/dev.db-journal
+
+# Backend test files
+shakti-backend/test-*.js
+shakti-backend/*-test.js
+
 # vercel
 .vercel
 

@@ -1,0 +1,83 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Vault {
+  id              String        @id @default(cuid())
+  contractAddress String        @unique @map("contract_address")
+  name            String
+  creatorAddress  String        @map("creator_address")
+  network         String        @default("sepolia")
+  txHash          String?       @map("tx_hash")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  members         VaultMember[]
+  loanProposals   LoanProposal[]
+
+  @@map("vaults")
+}
+
+model VaultMember {
+  id            String   @id @default(cuid())
+  walletAddress String   @map("wallet_address")
+  displayName   String?  @map("display_name")
+  role          String   @default("member")
+  joinedAt      DateTime @default(now()) @map("joined_at")
+  vault         Vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  vaultId       String   @map("vault_id")
+
+  @@unique([vaultId, walletAddress])
+  @@map("vault_members")
+}
+
+model LoanProposal {
+  id               String          @id @default(cuid())
+  loanId           BigInt          @map("loan_id")
+  borrowerAddress  String          @map("borrower_address")
+  amount           BigInt
+  purpose          String?
+  status           String          @default("pending")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  vault            Vault           @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  vaultId          String          @map("vault_id")
+  votes            LoanVote[]
+  repayments       LoanRepayment[]
+
+  @@unique([vaultId, loanId])
+  @@map("loan_proposals")
+}
+
+model LoanVote {
+  id             String       @id @default(cuid())
+  voterAddress   String       @map("voter_address")
+  voteType       String       @map("vote_type") // "approve" | "reject"
+  votedAt        DateTime     @default(now()) @map("voted_at")
+  txHash         String?      @map("tx_hash")
+  proposal       LoanProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  proposalId     String       @map("proposal_id")
+
+  @@unique([proposalId, voterAddress])
+  @@map("loan_votes")
+}
+
+model LoanRepayment {
+  id             String       @id @default(cuid())
+  amount         BigInt
+  repaidAt       DateTime     @default(now()) @map("repaid_at")
+  txHash         String       @map("tx_hash")
+  proposal       LoanProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  proposalId     String       @map("proposal_id")
+
+  @@map("loan_repayments")
+}
