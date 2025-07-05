@@ -56,12 +56,23 @@ export default function Web3ProviderWrapper({ children }: Web3ProviderWrapperPro
           display: 'flex', 
           alignItems: 'center', 
           justifyContent: 'center',
-          backgroundColor: '#f8fafc'
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
         }}
       >
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">{!isMounted ? 'Initializing...' : 'Loading Web3...'}</p>
+          <div className="relative mb-8">
+            <div className="animate-spin rounded-full h-16 w-16 border-4 border-white/20 border-t-white mx-auto"></div>
+            <div className="absolute inset-0 rounded-full h-16 w-16 border-4 border-transparent border-t-pink-400 animate-ping mx-auto"></div>
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">
+            {!isMounted ? 'Initializing Shakti Ledger...' : 'Loading Web3 Infrastructure...'}
+          </h2>
+          <p className="text-white/80">Preparing your decentralized experience</p>
+          <div className="mt-4 flex justify-center gap-1">
+            <div className="w-2 h-2 bg-white/60 rounded-full animate-pulse"></div>
+            <div className="w-2 h-2 bg-white/60 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+            <div className="w-2 h-2 bg-white/60 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
+          </div>
         </div>
       </div>
     );

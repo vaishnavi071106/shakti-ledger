@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react';
 import { useBackendVaults, useBackendVault, useCreateBackendVault, useUserBackendVaults } from './useBackendApi';
 
 export interface VaultMember {
@@ -42,13 +41,15 @@ export const useVaultMetadata = (userAddress?: string) => {
   const { 
     data: allVaultsData, 
     isLoading: allVaultsLoading, 
-    error: allVaultsError 
+    error: allVaultsError,
+    refetch: refetchAllVaults
   } = useBackendVaults();
   
   const { 
     data: userVaultsData, 
     isLoading: userVaultsLoading, 
-    error: userVaultsError 
+    error: userVaultsError,
+    refetch: refetchUserVaults
   } = useUserBackendVaults(userAddress || '');
 
   // Convert backend data to frontend format
@@ -70,6 +71,15 @@ export const useVaultMetadata = (userAddress?: string) => {
 
   const isLoaded = userAddress ? !userVaultsLoading : !allVaultsLoading;
   const error = userAddress ? userVaultsError : allVaultsError;
+
+  // Refetch function
+  const refetch = async () => {
+    if (userAddress) {
+      await refetchUserVaults();
+    } else {
+      await refetchAllVaults();
+    }
+  };
 
   // Add or update vault metadata
   const addVaultMetadata = async (newVault: VaultMetadata) => {
@@ -131,6 +141,7 @@ export const useVaultMetadata = (userAddress?: string) => {
     vaultMetadata,
     isLoaded,
     error,
+    refetch,
     addVaultMetadata,
     getVaultMetadata,
     getVaultName,

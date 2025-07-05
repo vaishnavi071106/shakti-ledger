@@ -6,6 +6,11 @@ import { useAccount } from 'wagmi';
 import { useIsMounted } from '@/hooks/useIsMounted';
 import { useVaultMetadata, extractVaultAddressFromLogs } from '@/hooks/useVaultMetadataBackend';
 import { useRouter } from 'next/navigation';
+import { 
+  Users, Shield, ChevronRight, ChevronLeft, Plus, Trash2, 
+  Wallet, CheckCircle, AlertCircle, Info, Sparkles, 
+  ArrowRight, Loader2, Copy, Check, UserPlus, Database
+} from 'lucide-react';
 
 interface Member {
   id: string;
@@ -13,7 +18,12 @@ interface Member {
   walletAddress: string;
 }
 
+interface ValidationState {
+  [key: string]: string | undefined;
+}
+
 export const CreateVaultForm = () => {
+  const [currentStep, setCurrentStep] = useState(1);
   const [vaultName, setVaultName] = useState('');
   const [members, setMembers] = useState<Member[]>([
     { id: '1', name: '', walletAddress: '' },
@@ -21,14 +31,18 @@ export const CreateVaultForm = () => {
     { id: '3', name: '', walletAddress: '' },
   ]);
   const [isValidating, setIsValidating] = useState(false);
-  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [validationErrors, setValidationErrors] = useState<ValidationState>({});
   const [redirectCountdown, setRedirectCountdown] = useState<number | null>(null);
+  const [touchedFields, setTouchedFields] = useState<Set<string>>(new Set());
+  const [hoveredMember, setHoveredMember] = useState<string | null>(null);
   
   const isMounted = useIsMounted();
   const { createVault, isPending, isConfirming, isConfirmed, error, hash, receipt, factoryAddress } = useCreateVault();
   const { address: connectedAddress, isConnected } = useAccount();
   const { addVaultMetadata, isCreating } = useVaultMetadata(connectedAddress);
   const router = useRouter();
+
+  const totalSteps = 3;
 
   // Save vault metadata when creation is successful
   useEffect(() => {
@@ -37,12 +51,10 @@ export const CreateVaultForm = () => {
         try {
           let vaultAddress: string;
           
-          // Try to extract actual vault address from transaction receipt
           if (receipt && receipt.logs) {
             const extractedAddress = extractVaultAddressFromLogs(receipt.logs);
             vaultAddress = extractedAddress || `0x${hash.slice(2, 42)}`;
           } else {
-            // Fallback to mock address based on hash
             vaultAddress = `0x${hash.slice(2, 42)}`;
           }
           
@@ -60,14 +72,6 @@ export const CreateVaultForm = () => {
             txHash: hash,
           });
 
-          console.log('Vault metadata saved to backend:', {
-            address: vaultAddress,
-            name: vaultName.trim(),
-            memberCount: vaultMembers.length,
-            txHash: hash,
-          });
-
-          // Auto-redirect to the new vault after a short delay
           setRedirectCountdown(3);
           const countdownInterval = setInterval(() => {
             setRedirectCountdown(prev => {
@@ -83,7 +87,6 @@ export const CreateVaultForm = () => {
           return () => clearInterval(countdownInterval);
         } catch (error) {
           console.error('Error saving vault metadata to backend:', error);
-          // Could show an error message to the user here
         }
       };
 
@@ -94,10 +97,17 @@ export const CreateVaultForm = () => {
   // Show loading state during SSR
   if (!isMounted) {
     return (
-      <div className="max-w-2xl mx-auto p-8 bg-white rounded-lg shadow-lg">
-        <h2 className="text-2xl font-bold mb-6 text-gray-800">Create New SHG Vault</h2>
-        <div className="text-center py-8">
-          <p className="text-gray-600">Loading form...</p>
+      <div className="max-w-4xl mx-auto">
+        <div className="bg-surface-primary rounded-3xl p-8 border border-surface">
+          <div className="animate-pulse">
+            <div className="h-8 bg-white/20 rounded-xl w-1/3 mb-4"></div>
+            <div className="h-4 bg-white/20 rounded-lg w-2/3 mb-8"></div>
+            <div className="space-y-4">
+              <div className="h-12 bg-white/20 rounded-xl"></div>
+              <div className="h-12 bg-white/20 rounded-xl"></div>
+              <div className="h-12 bg-white/20 rounded-xl"></div>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -111,6 +121,14 @@ export const CreateVaultForm = () => {
   const removeMember = (id: string) => {
     if (members.length > 3) {
       setMembers(members.filter(member => member.id !== id));
+      // Clean up validation errors for removed member
+      const newErrors = { ...validationErrors };
+      Object.keys(newErrors).forEach(key => {
+        if (key.startsWith(`member_${id}_`)) {
+          delete newErrors[key];
+        }
+      });
+      setValidationErrors(newErrors);
     }
   };
 
@@ -118,100 +136,119 @@ export const CreateVaultForm = () => {
     setMembers(members.map(member => 
       member.id === id ? { ...member, [field]: value } : member
     ));
+    
+    // Clear validation error when user starts typing
+    const fieldKey = `member_${id}_${field}`;
+    if (validationErrors[fieldKey]) {
+      setValidationErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[fieldKey];
+        return newErrors;
+      });
+    }
   };
 
-  const validateForm = (): string[] => {
-    const errors: string[] = [];
+  const markFieldAsTouched = (fieldKey: string) => {
+    setTouchedFields(prev => new Set(prev).add(fieldKey));
+  };
+
+  const validateStep = (step: number): boolean => {
+    const errors: ValidationState = {};
     
-    // Validate vault name
-    if (!vaultName.trim()) {
-      errors.push('Vault name is required.');
-    }
-
-    // Filter out empty members
-    const validMembers = members.filter(member => member.name.trim() || member.walletAddress.trim());
-    
-    if (validMembers.length < 3) {
-      errors.push('You need at least 3 members to create a vault.');
-    }
-
-    const uniqueAddresses = new Set<string>();
-    const uniqueNames = new Set<string>();
-
-    validMembers.forEach((member, index) => {
-      const memberNumber = index + 1;
-      
-      // Validate member name
-      if (!member.name.trim()) {
-        errors.push(`Member ${memberNumber}: Name is required.`);
-      } else {
-        const lowerName = member.name.trim().toLowerCase();
-        if (uniqueNames.has(lowerName)) {
-          errors.push(`Member ${memberNumber}: Duplicate name "${member.name}".`);
-        } else {
-          uniqueNames.add(lowerName);
-        }
+    if (step === 1) {
+      if (!vaultName.trim()) {
+        errors.vaultName = 'Vault name is required';
+      } else if (vaultName.trim().length < 3) {
+        errors.vaultName = 'Vault name must be at least 3 characters';
+      } else if (vaultName.trim().length > 50) {
+        errors.vaultName = 'Vault name must be less than 50 characters';
       }
+    }
+    
+    if (step === 2) {
+      const validMembers = members.filter(member => member.name.trim() || member.walletAddress.trim());
       
-      // Validate wallet address
-      if (!member.walletAddress.trim()) {
-        errors.push(`Member ${memberNumber}: Wallet address is required.`);
-      } else {
-        const trimmedAddr = member.walletAddress.trim().toLowerCase();
+      if (validMembers.length < 3) {
+        errors.general = 'You need at least 3 members to create a vault';
+      }
+
+      const uniqueAddresses = new Set<string>();
+      const uniqueNames = new Set<string>();
+
+      validMembers.forEach((member, index) => {
+        const memberKey = member.id;
         
-        // Check if it's a valid Ethereum address format
-        if (!trimmedAddr.match(/^0x[a-fA-F0-9]{40}$/)) {
-          errors.push(`Member ${memberNumber}: "${member.walletAddress}" is not a valid Ethereum address.`);
+        if (!member.name.trim()) {
+          errors[`member_${memberKey}_name`] = 'Name is required';
         } else {
-          // Check for duplicate addresses
-          if (uniqueAddresses.has(trimmedAddr)) {
-            errors.push(`Member ${memberNumber}: Duplicate wallet address "${member.walletAddress}".`);
+          const lowerName = member.name.trim().toLowerCase();
+          if (uniqueNames.has(lowerName)) {
+            errors[`member_${memberKey}_name`] = 'Name must be unique';
           } else {
-            uniqueAddresses.add(trimmedAddr);
+            uniqueNames.add(lowerName);
           }
         }
-      }
-    });
+        
+        if (!member.walletAddress.trim()) {
+          errors[`member_${memberKey}_walletAddress`] = 'Wallet address is required';
+        } else {
+          const trimmedAddr = member.walletAddress.trim().toLowerCase();
+          
+          if (!trimmedAddr.match(/^0x[a-fA-F0-9]{40}$/)) {
+            errors[`member_${memberKey}_walletAddress`] = 'Invalid Ethereum address';
+          } else {
+            if (uniqueAddresses.has(trimmedAddr)) {
+              errors[`member_${memberKey}_walletAddress`] = 'Address must be unique';
+            } else {
+              uniqueAddresses.add(trimmedAddr);
+            }
+          }
+        }
+      });
 
-    // Check if connected wallet is included in the members list
-    if (connectedAddress && !validMembers.some(member => 
-      member.walletAddress.trim().toLowerCase() === connectedAddress.toLowerCase()
-    )) {
-      errors.push('Your connected wallet address must be included in the member list.');
+      if (connectedAddress && !validMembers.some(member => 
+        member.walletAddress.trim().toLowerCase() === connectedAddress.toLowerCase()
+      )) {
+        errors.general = errors.general ? errors.general + '. Your wallet must be included in the member list' : 'Your wallet must be included in the member list';
+      }
     }
 
-    return errors;
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleNextStep = () => {
+    if (validateStep(currentStep)) {
+      setCurrentStep(prev => Math.min(prev + 1, totalSteps));
+    }
+  };
+
+  const handlePrevStep = () => {
+    setCurrentStep(prev => Math.max(prev - 1, 1));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsValidating(true);
-    setValidationErrors([]);
 
     if (!isConnected) {
-      setValidationErrors(['Please connect your wallet first.']);
+      setValidationErrors({ general: 'Please connect your wallet first' });
       setIsValidating(false);
       return;
     }
 
-    const errors = validateForm();
-
-    if (errors.length > 0) {
-      setValidationErrors(errors);
+    if (!validateStep(1) || !validateStep(2)) {
       setIsValidating(false);
       return;
     }
 
     try {
-      // Extract wallet addresses from valid members (excluding empty ones)
       const validMembers = members.filter(member => member.name.trim() && member.walletAddress.trim());
       const memberAddresses = validMembers.map(member => member.walletAddress.trim() as `0x${string}`);
       
-      // Note: The smart contract only takes addresses, but we'll store the vault name 
-      // and member names in the UI state for future enhancements
       createVault(memberAddresses);
     } catch (err) {
-      setValidationErrors([err instanceof Error ? err.message : 'Unknown error occurred']);
+      setValidationErrors({ general: err instanceof Error ? err.message : 'Unknown error occurred' });
     }
     
     setIsValidating(false);
@@ -219,14 +256,12 @@ export const CreateVaultForm = () => {
 
   const addCurrentWallet = () => {
     if (connectedAddress) {
-      // Find first empty member slot or add new one
       const emptyMemberIndex = members.findIndex(member => !member.walletAddress.trim());
       
       if (emptyMemberIndex >= 0) {
         updateMember(members[emptyMemberIndex].id, 'walletAddress', connectedAddress);
         updateMember(members[emptyMemberIndex].id, 'name', 'Me');
       } else {
-        // Check if address is already added
         const addressExists = members.some(member => 
           member.walletAddress.trim().toLowerCase() === connectedAddress.toLowerCase()
         );
@@ -248,257 +283,469 @@ export const CreateVaultForm = () => {
     
     setVaultName('Community Savings Group');
     setMembers(sampleMembers);
-
-    // Create realistic test vaults that would appear in vault discovery
-    const testVaults = [
-      {
-        address: '0x7c0DB073feE1533B38cEEb00Cc0bb306D51aFb1b',
-        name: 'Community Savings Group',
-        members: [
-          { address: connectedAddress || '0x1234567890123456789012345678901234567890', name: 'Alice Johnson' },
-          { address: '0x2345678901234567890123456789012345678901', name: 'Bob Smith' },
-          { address: '0x3456789012345678901234567890123456789012', name: 'Carol Davis' }
-        ],
-        createdAt: new Date().toISOString(),
-        txHash: '0xabcd1234567890abcd1234567890abcd1234567890abcd1234567890abcd123456',
-      },
-      {
-        address: '0x8B3192f5eebd8579568a2ed41e6fed7b7a12a134',
-        name: 'Women Entrepreneurs Circle',
-        members: [
-          { address: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045', name: 'Maria Garcia' },
-          { address: '0x2546BcD3c84621e976D8185a91A922aE77ECEc30', name: 'Sarah Williams' },
-          { address: '0x14723A09ACff6D2A60DcdF7aA4AFf308FDDC160C', name: 'Jennifer Brown' },
-          { address: '0x4B0897b0513fdC7C541B6d9D7E929C4e5364D2dB', name: 'Emily Davis' },
-        ],
-        createdAt: new Date(Date.now() - 86400000).toISOString(), // 1 day ago
-        txHash: '0xefgh5678901234efgh5678901234efgh5678901234efgh5678901234efgh567890',
-      },
-      {
-        address: '0xa16E02E87b7454126E5E10d957A927A7F5B5d2be',
-        name: 'Small Business Cooperative',
-        members: [
-          { address: '0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f', name: 'David Wilson' },
-          { address: '0xa0Ee7A142d267C1f36714E4a8F75612F20a79720', name: 'Michael Johnson' },
-          { address: '0xBcd4042DE499D14e55001CcbB24a551F3b954096', name: 'Robert Anderson' },
-        ],
-        createdAt: new Date(Date.now() - 172800000).toISOString(), // 2 days ago
-        txHash: '0xijkl9012345678ijkl9012345678ijkl9012345678ijkl9012345678ijkl901234',
-      }
-    ];
-
-    // Add all test vaults to the database
-    testVaults.forEach(vault => {
-      addVaultMetadata(vault);
-    });
-
-    console.log('Sample data generated:', testVaults.length, 'vaults added to database');
   };
+
+  const formatAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 
   if (!factoryAddress || factoryAddress === '0x0000000000000000000000000000000000000000') {
     return (
-      <div className="p-8 border border-red-300 rounded-lg max-w-md mx-auto bg-red-50">
-        <h2 className="text-2xl font-bold mb-4 text-red-800">Configuration Required</h2>
-        <p className="text-red-700 mb-4">
-          The SHG Factory contract address is not configured. 
-        </p>
-        <p className="text-sm text-red-600">
-          Please set <code className="bg-red-200 px-1 rounded">NEXT_PUBLIC_SHG_FACTORY_ADDRESS</code> in your environment variables after deploying the contracts.
-        </p>
+      <div className="max-w-2xl mx-auto">
+        <div className="bg-gradient-to-br from-red-500/20 to-pink-500/20 backdrop-blur-xl rounded-3xl p-8 border border-red-400/30">
+          <div className="flex items-center gap-4 mb-4">
+            <div className="w-12 h-12 bg-red-500/20 rounded-2xl flex items-center justify-center">
+              <Shield className="w-6 h-6 text-red-400" />
+            </div>
+            <h2 className="text-2xl font-bold text-red-400">Configuration Required</h2>
+          </div>
+          <p className="text-red-300/80 mb-4">
+            The SHG Factory contract address is not configured. 
+          </p>
+          <p className="text-sm text-red-300/60 bg-red-500/10 p-4 rounded-xl font-mono">
+            Please set NEXT_PUBLIC_SHG_FACTORY_ADDRESS in your environment variables
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="p-8 border border-gray-300 rounded-lg max-w-4xl mx-auto bg-white shadow-lg">
-      <div className="mb-6">
-        <h2 className="text-3xl font-bold mb-2 text-gray-900">Create a New SHG Vault</h2>
-        <p className="text-gray-600">
-          Create a decentralized treasury for your Self-Help Group. Each vault requires at least 3 members.
-        </p>
-      </div>
-
-      <div className="mb-6 p-4 bg-blue-50 rounded-lg">
-        <h3 className="font-semibold text-blue-800 mb-2">Factory Contract Info:</h3>
-        <p className="text-sm text-blue-700 font-mono break-all">
-          {factoryAddress}
-        </p>
-      </div>
-
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Vault Name Input */}
-        <div>
-          <label htmlFor="vaultName" className="block text-sm font-medium text-gray-700 mb-2">
-            Vault Name *
-          </label>
-          <input
-            id="vaultName"
-            type="text"
-            value={vaultName}
-            onChange={(e) => setVaultName(e.target.value)}
-            placeholder="Enter a name for your SHG vault (e.g., Community Savings Group)"
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            required
-          />
-          <p className="text-sm text-gray-500 mt-1">
-            Give your vault a meaningful name that members can easily identify.
-          </p>
+    <div className="max-w-4xl mx-auto">
+      <div className="bg-surface-primary rounded-3xl border border-surface overflow-hidden">
+        {/* Header */}
+        <div className="relative p-8 border-b border-surface">
+          <div className="absolute inset-0 bg-gradient-to-br from-purple-600/20 to-indigo-600/20"></div>
+          <div className="relative z-10">
+            <h2 className="text-3xl font-bold text-primary mb-2 flex items-center gap-3">
+              <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl flex items-center justify-center">
+                <Plus className="w-5 h-5 text-white" />
+              </div>
+              Create a New SHG Vault
+            </h2>
+            <p className="text-secondary">
+              Set up a decentralized treasury for your Self-Help Group
+            </p>
+          </div>
         </div>
 
-        {/* Members Section */}
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <label className="block text-sm font-medium text-gray-700">
-              Vault Members * (minimum 3 required)
-            </label>
-            <div className="flex gap-2">
-              {isConnected && (
-                <button
-                  type="button"
-                  onClick={addCurrentWallet}
-                  className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
-                >
-                  Add My Wallet
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={generateSampleData}
-                className="px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors"
-              >
-                Use Sample Data
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            {members.map((member, index) => (
-              <div key={member.id} className="p-4 border border-gray-200 rounded-lg bg-gray-50">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="font-medium text-gray-700">Member {index + 1}</h4>
-                  {members.length > 3 && (
-                    <button
-                      type="button"
-                      onClick={() => removeMember(member.id)}
-                      className="p-1 text-red-600 hover:text-red-800 hover:bg-red-100 rounded transition-colors"
-                      title="Remove member"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
+        {/* Progress Bar */}
+        <div className="px-8 pt-6 bg-surface-secondary">
+          <div className="flex items-center justify-between mb-8">
+            {[1, 2, 3].map((step) => (
+              <div key={step} className="flex items-center">
+                <div className={`
+                  w-12 h-12 rounded-2xl flex items-center justify-center font-semibold transition-all duration-300
+                  ${currentStep >= step 
+                    ? 'bg-gradient-to-br from-purple-500 to-indigo-600 text-white shadow-lg shadow-purple-500/30'
+                    : 'bg-surface-tertiary text-tertiary border border-surface'
+                  }
+                `}>
+                  {currentStep > step ? (
+                    <CheckCircle className="w-6 h-6" />
+                  ) : (
+                    step
                   )}
                 </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                      Member Name *
-                    </label>
-                    <input
-                      type="text"
-                      value={member.name}
-                      onChange={(e) => updateMember(member.id, 'name', e.target.value)}
-                      placeholder="Enter member's name"
-                      className="w-full p-2 border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                    />
-                  </div>
-                  
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                      Wallet Address *
-                    </label>
-                    <input
-                      type="text"
-                      value={member.walletAddress}
-                      onChange={(e) => updateMember(member.id, 'walletAddress', e.target.value)}
-                      placeholder="0x1234567890123456789012345678901234567890"
-                      className="w-full p-2 border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm font-mono"
-                    />
-                  </div>
-                </div>
+                {step < 3 && (
+                  <div className={`
+                    w-24 h-1 ml-2 transition-all duration-500 rounded-full
+                    ${currentStep > step 
+                      ? 'bg-gradient-to-r from-purple-500 to-indigo-600'
+                      : 'bg-surface-tertiary'
+                    }
+                  `} />
+                )}
               </div>
             ))}
           </div>
 
-          {/* Add Member Button */}
-          <div className="mt-4">
-            <button
-              type="button"
-              onClick={addMember}
-              className="flex items-center gap-2 px-4 py-2 text-sm text-blue-700 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-              </svg>
-              Add Another Member
-            </button>
+          <div className="flex justify-between text-sm mb-8">
+            <span className={`transition-colors duration-300 ${currentStep >= 1 ? 'text-purple-400 font-semibold' : 'text-tertiary'}`}>
+              Vault Details
+            </span>
+            <span className={`transition-colors duration-300 ${currentStep >= 2 ? 'text-purple-400 font-semibold' : 'text-tertiary'}`}>
+              Add Members
+            </span>
+            <span className={`transition-colors duration-300 ${currentStep >= 3 ? 'text-purple-400 font-semibold' : 'text-tertiary'}`}>
+              Review & Create
+            </span>
           </div>
-
-          <p className="text-sm text-gray-500 mt-2">
-            Each member should provide their name and wallet address. All members will have equal voting rights in the vault.
-          </p>
         </div>
 
-        {/* Validation Errors */}
-        {validationErrors.length > 0 && (
-          <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-            <h4 className="font-medium text-red-800 mb-2">Please fix the following errors:</h4>
-            <ul className="list-disc list-inside text-sm text-red-700 space-y-1">
-              {validationErrors.map((error, index) => (
-                <li key={index}>{error}</li>
-              ))}
-            </ul>
+        <form onSubmit={handleSubmit} className="px-8 pb-8">
+          {/* Step 1: Vault Details */}
+          {currentStep === 1 && (
+            <div className="space-y-6 animate-fade-in-up">
+              <div>
+                <label htmlFor="vaultName" className="block text-sm font-semibold text-secondary mb-2">
+                  Vault Name
+                </label>
+                <div className="relative">
+                  <input
+                    id="vaultName"
+                    type="text"
+                    value={vaultName}
+                    onChange={(e) => {
+                      setVaultName(e.target.value);
+                      if (validationErrors.vaultName) {
+                        setValidationErrors(prev => {
+                          const newErrors = { ...prev };
+                          delete newErrors.vaultName;
+                          return newErrors;
+                        });
+                      }
+                    }}
+                    onBlur={() => markFieldAsTouched('vaultName')}
+                    placeholder="e.g., Community Savings Group"
+                    className={`
+                      w-full px-4 py-3 bg-surface-tertiary border rounded-xl transition-all
+                      ${validationErrors.vaultName && touchedFields.has('vaultName')
+                        ? 'border-red-400/50 focus:border-red-400'
+                        : 'border-surface focus:border-purple-400'
+                      }
+                      text-primary placeholder-gray-400
+                      focus:outline-none focus:bg-surface-secondary
+                    `}
+                  />
+                  <Database className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-tertiary" />
+                </div>
+                {validationErrors.vaultName && touchedFields.has('vaultName') && (
+                  <p className="mt-2 text-sm text-red-400 flex items-center gap-1">
+                    <AlertCircle className="w-4 h-4" />
+                    {validationErrors.vaultName}
+                  </p>
+                )}
+                <p className="mt-2 text-sm text-tertiary">
+                  Choose a meaningful name that members can easily identify
+                </p>
+              </div>
+
+              <div className="bg-gradient-to-br from-purple-500/10 to-indigo-500/10 border border-purple-400/30 rounded-2xl p-6">
+                <h3 className="font-semibold text-purple-300 mb-3 flex items-center gap-2">
+                  <Info className="w-5 h-5" />
+                  What is an SHG Vault?
+                </h3>
+                <ul className="space-y-2 text-sm text-purple-200/80">
+                  <li className="flex items-start gap-2">
+                    <Sparkles className="w-4 h-4 text-purple-400 mt-0.5" />
+                    <span>A shared treasury managed by group members</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <Sparkles className="w-4 h-4 text-purple-400 mt-0.5" />
+                    <span>Members can contribute funds and request loans</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <Sparkles className="w-4 h-4 text-purple-400 mt-0.5" />
+                    <span>All decisions require member consensus (60% approval)</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <Sparkles className="w-4 h-4 text-purple-400 mt-0.5" />
+                    <span>Transparent and secure on the blockchain</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {/* Step 2: Add Members */}
+          {currentStep === 2 && (
+            <div className="space-y-6 animate-fade-in-up">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-primary">Vault Members</h3>
+                  <p className="text-sm text-tertiary">Add at least 3 members to your vault</p>
+                </div>
+                <div className="flex gap-2">
+                  {isConnected && (
+                    <button
+                      type="button"
+                      onClick={addCurrentWallet}
+                      className="px-4 py-2 text-sm bg-purple-500/20 text-purple-300 rounded-xl hover:bg-purple-500/30 transition-all flex items-center gap-2 border border-purple-400/30"
+                    >
+                      <Wallet className="w-4 h-4" />
+                      Add My Wallet
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={generateSampleData}
+                    className="px-4 py-2 text-sm bg-surface-tertiary text-secondary rounded-xl hover:bg-surface-secondary transition-all border border-surface"
+                  >
+                    Use Sample Data
+                  </button>
+                </div>
+              </div>
+
+              {validationErrors.general && (
+                <div className="p-4 bg-red-500/10 border border-red-400/30 rounded-xl flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-400 mt-0.5" />
+                  <p className="text-sm text-red-300">{validationErrors.general}</p>
+                </div>
+              )}
+
+              <div className="space-y-4">
+                {members.map((member, index) => (
+                  <div 
+                    key={member.id} 
+                    className={`
+                      bg-surface-secondary rounded-2xl p-6 border transition-all duration-300
+                      ${hoveredMember === member.id
+                        ? 'border-purple-400/50 bg-surface-tertiary shadow-lg shadow-purple-500/10'
+                        : 'border-surface'
+                      }
+                    `}
+                    onMouseEnter={() => setHoveredMember(member.id)}
+                    onMouseLeave={() => setHoveredMember(null)}
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl flex items-center justify-center">
+                          <span className="text-white font-semibold">{index + 1}</span>
+                        </div>
+                        <h4 className="font-medium text-primary">Member {index + 1}</h4>
+                      </div>
+                      {members.length > 3 && (
+                        <button
+                          type="button"
+                          onClick={() => removeMember(member.id)}
+                          className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-all"
+                          title="Remove member"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      )}
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-secondary mb-2">
+                          Name
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={member.name}
+                            onChange={(e) => updateMember(member.id, 'name', e.target.value)}
+                            onBlur={() => markFieldAsTouched(`member_${member.id}_name`)}
+                            placeholder="Enter member's name"
+                            className={`
+                              w-full px-4 py-2.5 bg-surface-tertiary border rounded-xl transition-all
+                              ${validationErrors[`member_${member.id}_name`] && touchedFields.has(`member_${member.id}_name`)
+                                ? 'border-red-400/50 focus:border-red-400'
+                                : 'border-surface focus:border-purple-400'
+                              }
+                              text-primary placeholder-gray-400
+                              focus:outline-none focus:bg-surface-secondary
+                            `}
+                          />
+                          <UserPlus className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-tertiary" />
+                        </div>
+                        {validationErrors[`member_${member.id}_name`] && touchedFields.has(`member_${member.id}_name`) && (
+                          <p className="mt-1 text-xs text-red-400">{validationErrors[`member_${member.id}_name`]}</p>
+                        )}
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-secondary mb-2">
+                          Wallet Address
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={member.walletAddress}
+                            onChange={(e) => updateMember(member.id, 'walletAddress', e.target.value)}
+                            onBlur={() => markFieldAsTouched(`member_${member.id}_walletAddress`)}
+                            placeholder="0x..."
+                            className={`
+                              w-full px-4 py-2.5 bg-surface-tertiary border rounded-xl transition-all font-mono text-sm
+                              ${validationErrors[`member_${member.id}_walletAddress`] && touchedFields.has(`member_${member.id}_walletAddress`)
+                                ? 'border-red-400/50 focus:border-red-400'
+                                : 'border-surface focus:border-purple-400'
+                              }
+                              text-primary placeholder-gray-400
+                              focus:outline-none focus:bg-surface-secondary
+                            `}
+                          />
+                          <Wallet className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-tertiary" />
+                        </div>
+                        {validationErrors[`member_${member.id}_walletAddress`] && touchedFields.has(`member_${member.id}_walletAddress`) && (
+                          <p className="mt-1 text-xs text-red-400">{validationErrors[`member_${member.id}_walletAddress`]}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={addMember}
+                className="w-full py-3 border-2 border-dashed border-purple-400/30 text-purple-300 rounded-2xl hover:border-purple-400/50 hover:bg-purple-500/10 transition-all flex items-center justify-center gap-2"
+              >
+                <Plus className="w-5 h-5" />
+                Add Another Member
+              </button>
+            </div>
+          )}
+
+          {/* Step 3: Review & Create */}
+          {currentStep === 3 && (
+            <div className="space-y-6 animate-fade-in-up">
+              <div className="bg-gradient-to-br from-purple-500/10 to-indigo-500/10 border border-purple-400/30 rounded-2xl p-6">
+                <h3 className="font-semibold text-purple-300 mb-4">Review Your Vault</h3>
+                
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-sm text-purple-200/60 mb-1">Vault Name</p>
+                    <p className="font-semibold text-primary text-lg">{vaultName}</p>
+                  </div>
+                  
+                  <div>
+                    <p className="text-sm text-purple-200/60 mb-2">Members ({members.filter(m => m.name.trim() && m.walletAddress.trim()).length})</p>
+                    <div className="space-y-2">
+                      {members.filter(m => m.name.trim() && m.walletAddress.trim()).map((member, index) => (
+                        <div key={member.id} className="flex items-center gap-3 bg-surface-tertiary p-3 rounded-xl border border-surface">
+                          <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-lg flex items-center justify-center">
+                            <span className="text-white text-sm font-semibold">{index + 1}</span>
+                          </div>
+                          <div className="flex-1">
+                            <p className="font-medium text-primary">{member.name}</p>
+                            <p className="text-xs text-tertiary font-mono">{formatAddress(member.walletAddress)}</p>
+                          </div>
+                          {member.walletAddress.toLowerCase() === connectedAddress?.toLowerCase() && (
+                            <span className="px-2 py-1 bg-purple-500/20 text-purple-300 text-xs rounded-full border border-purple-400/30">You</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gradient-to-br from-blue-500/10 to-cyan-500/10 border border-blue-400/30 rounded-2xl p-6">
+                <h3 className="font-semibold text-blue-300 mb-3 flex items-center gap-2">
+                  <CheckCircle className="w-5 h-5" />
+                  What happens next?
+                </h3>
+                <ul className="space-y-2 text-sm text-blue-200/80">
+                  <li className="flex items-start gap-2">
+                    <ArrowRight className="w-4 h-4 text-blue-400 mt-0.5" />
+                    <span>A new vault contract will be deployed on the blockchain</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <ArrowRight className="w-4 h-4 text-blue-400 mt-0.5" />
+                    <span>Each member will receive equal voting rights</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <ArrowRight className="w-4 h-4 text-blue-400 mt-0.5" />
+                    <span>Members can start contributing funds immediately</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <ArrowRight className="w-4 h-4 text-blue-400 mt-0.5" />
+                    <span>Loan requests will require 60% member approval</span>
+                  </li>
+                </ul>
+              </div>
+
+              {/* Transaction Error */}
+              {error && (
+                <div className="p-4 bg-red-500/10 border border-red-400/30 rounded-xl">
+                  <h4 className="font-medium text-red-300 mb-2">Transaction Error:</h4>
+                  <p className="text-sm text-red-200/80">{error.message || 'An unknown error occurred'}</p>
+                </div>
+              )}
+
+              {/* Success Message */}
+              {isConfirmed && hash && (
+                <div className="p-6 bg-gradient-to-br from-green-500/10 to-emerald-500/10 border-2 border-green-400/30 rounded-2xl">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 bg-green-500/20 rounded-xl flex items-center justify-center flex-shrink-0">
+                      <Check className="w-6 h-6 text-green-400" />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-green-400 text-lg mb-2">Vault Created Successfully!</h4>
+                      <p className="text-green-300/80 mb-3">
+                        Your SHG vault "{vaultName}" has been deployed with {members.filter(m => m.name.trim() && m.walletAddress.trim()).length} members.
+                      </p>
+                      <div className="flex items-center gap-2 text-green-300 mb-3">
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        <span className="font-medium">Redirecting in {redirectCountdown} second{redirectCountdown !== 1 ? 's' : ''}...</span>
+                      </div>
+                      <p className="text-xs text-green-300/60 font-mono bg-green-500/10 p-3 rounded-lg break-all">
+                        Transaction: {hash}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Navigation Buttons */}
+          <div className="flex justify-between mt-8">
+            {currentStep > 1 && (
+              <button
+                type="button"
+                onClick={handlePrevStep}
+                disabled={isPending || isConfirming}
+                className="px-6 py-3 bg-surface-tertiary text-primary rounded-xl hover:bg-surface-secondary transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed border border-surface"
+              >
+                <ChevronLeft className="w-5 h-5" />
+                Previous
+              </button>
+            )}
+            
+            <div className="ml-auto">
+              {currentStep < 3 ? (
+                <button
+                  type="button"
+                  onClick={handleNextStep}
+                  className="px-6 py-3 bg-gradient-to-r from-purple-500 to-indigo-600 text-white rounded-xl hover:from-purple-600 hover:to-indigo-700 transition-all flex items-center gap-2 shadow-lg shadow-purple-500/30"
+                >
+                  Next
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!isConnected || isPending || isConfirming || isValidating || isCreating}
+                  className="px-8 py-3 bg-gradient-to-r from-purple-500 to-indigo-600 text-white font-semibold rounded-xl hover:from-purple-600 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-lg shadow-purple-500/30"
+                >
+                  {!isConnected ? (
+                    <>
+                      <Wallet className="w-5 h-5" />
+                      Connect Wallet First
+                    </>
+                  ) : isPending ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Check Wallet...
+                    </>
+                  ) : isConfirming ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Creating Vault...
+                    </>
+                  ) : isCreating ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Saving Vault Data...
+                    </>
+                  ) : isValidating ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Validating...
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-5 h-5" />
+                      Create SHG Vault
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
-        )}
-
-        {/* Transaction Error */}
-        {error && (
-          <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-            <h4 className="font-medium text-red-800 mb-2">Transaction Error:</h4>
-            <p className="text-sm text-red-700">{error.message || 'An unknown error occurred'}</p>
-          </div>
-        )}
-
-        {/* Success Message */}
-        {isConfirmed && hash && (
-          <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-            <h4 className="font-medium text-green-800 mb-2">✅ Vault Created Successfully!</h4>
-            <p className="text-sm text-green-700 mb-2">
-              Your SHG vault "{vaultName}" has been deployed to the blockchain with {members.filter(m => m.name.trim() && m.walletAddress.trim()).length} members.
-            </p>
-            <p className="text-sm text-green-600 mb-2">
-              🚀 Redirecting to your new vault in {redirectCountdown} second{redirectCountdown !== 1 ? 's' : ''}...
-            </p>
-            <p className="text-xs text-green-600 font-mono break-all">
-              Transaction: {hash}
-            </p>
-          </div>
-        )}
-
-        <button
-          type="submit"
-          disabled={!isConnected || isPending || isConfirming || isValidating || isCreating}
-          className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition-colors"
-        >
-          {!isConnected ? 'Connect Wallet First' :
-           isPending ? 'Check Wallet...' : 
-           isConfirming ? 'Creating Vault...' : 
-           isCreating ? 'Saving Vault Data...' :
-           isValidating ? 'Validating...' : 
-           'Create SHG Vault'}
-        </button>
-      </form>
-
-      <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-        <h4 className="font-medium text-gray-800 mb-2">What happens next?</h4>
-        <ul className="text-sm text-gray-600 space-y-1">
-          <li>• A new vault contract will be deployed with your specified members</li>
-          <li>• Each member will receive equal shares in the vault</li>
-          <li>• Members can contribute funds and request loans</li>
-          <li>• Loan approvals require 60% member consensus</li>
-          <li>• The vault name and member names are stored for better organization</li>
-        </ul>
+        </form>
       </div>
     </div>
   );
